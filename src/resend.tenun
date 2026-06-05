@@ -1,0 +1,47 @@
+// Transport Resend (HTTPS REST API) — alternatif SMTP untuk layanan ber-TLS.
+// Memakai builtin httpKirim (TLS otomatis). Dapatkan API key di resend.com.
+
+// Escape teks untuk dimasukkan ke string JSON.
+fungsi mail_json_escape(s: teks): teks {
+    biar r: teks = ganti(s, "\\", "\\\\");
+    r = ganti(r, "\"", "\\\"");
+    r = ganti(r, "\r", "\\r");
+    r = ganti(r, "\n", "\\n");
+    r = ganti(r, "\t", "\\t");
+    kembali r;
+}
+
+// Kirim email HTML via Resend. Kembalikan badan respons JSON (berisi "id" bila sukses,
+// atau "message"/"error" bila gagal). Catatan disimpan ke transkrip (mail_log).
+fungsi mail_resend_html(apikey: teks, pengirim: teks, tujuan: teks, subjek: teks, html: teks): teks {
+    biar body: teks = "{\"from\":\"" + mail_json_escape(pengirim)
+        + "\",\"to\":[\"" + mail_json_escape(tujuan)
+        + "\"],\"subject\":\"" + mail_json_escape(subjek)
+        + "\",\"html\":\"" + mail_json_escape(html) + "\"}";
+    biar header: teks = "Authorization: Bearer " + apikey + "\nContent-Type: application/json";
+    mail_log_reset();
+    mail_catat(">>", "POST https://api.resend.com/emails");
+    mail_catat(">>", body);
+    biar resp: teks = httpKirim("POST", "https://api.resend.com/emails", header, body);
+    mail_catat("<<", resp);
+    kembali resp;
+}
+
+// Kirim email teks polos via Resend.
+fungsi mail_resend(apikey: teks, pengirim: teks, tujuan: teks, subjek: teks, isi: teks): teks {
+    biar body: teks = "{\"from\":\"" + mail_json_escape(pengirim)
+        + "\",\"to\":[\"" + mail_json_escape(tujuan)
+        + "\"],\"subject\":\"" + mail_json_escape(subjek)
+        + "\",\"text\":\"" + mail_json_escape(isi) + "\"}";
+    biar header: teks = "Authorization: Bearer " + apikey + "\nContent-Type: application/json";
+    mail_log_reset();
+    mail_catat(">>", "POST https://api.resend.com/emails");
+    biar resp: teks = httpKirim("POST", "https://api.resend.com/emails", header, body);
+    mail_catat("<<", resp);
+    kembali resp;
+}
+
+// True bila respons Resend menandakan sukses (ada field "id").
+fungsi mail_resend_sukses(resp: teks): bool {
+    kembali cari(resp, "\"id\"") >= 0;
+}

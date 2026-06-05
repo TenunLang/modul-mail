@@ -1,18 +1,30 @@
 impor "mail";
 
-// Relay lokal tanpa auth (mis. MailHog/Mailpit di dev).
-biar r: bulat = mail_kirim(
-    "127.0.0.1", 1025,
-    "", "",
-    "noreply@situs.id", "pengguna@contoh.id",
-    "Selamat datang",
-    "Halo, ini email dari aplikasi Tenun."
-);
-kalau r == 0 {
-    cetak("email terkirim");
+// --- Validasi ---
+cetak(mail_validasi("a@x.id"));        // benar
+cetak(mail_validasi("bukan-email"));   // salah
+
+// --- Kirim via Resend API (HTTPS, tanpa TLS SMTP) ---
+biar resp: teks = mail_resend_html("re_xxx", "onboarding@resend.dev",
+    "kamu@email.id", "Halo dari Tenun", "<h1>Tenun</h1><p>Email HTML.</p>");
+kalau mail_resend_sukses(resp) {
+    cetak("Resend: terkirim");
 } lain {
-    cetak("gagal kirim, kode: " + keTeks(r));
+    cetak("Resend gagal: " + resp);
 }
 
-// Dengan AUTH LOGIN:
-// mail_kirim("smtp.relay.id", 587, "user", "sandi", "dari@id", "ke@id", "Subjek", "Isi");
+// --- Kirim via SMTP polos (mis. Mailpit lokal :1025) ---
+biar r: bulat = mail_kirim_lengkap("127.0.0.1", 1025, "", "",
+    "no@situs.id", "user@x.id", "Subjek", "Versi teks.", "<b>Versi HTML</b>");
+cetak("SMTP kode: " + keTeks(r));
+
+// --- Baca Gmail via IMAPS (TLS 993) ---
+biar s: bulat = imap_sambung_aman("imap.gmail.com", 993);
+kalau imap_login(s, "akun@gmail.com", "app password") {
+    biar n: bulat = imap_pilih(s, "INBOX");
+    cetak("INBOX: " + keTeks(n) + " pesan");
+    biar pesan: teks = imap_ambil_header(s, n);
+    cetak("terakhir dari: " + imap_header(pesan, "From"));
+    cetak("subjek      : " + imap_header(pesan, "Subject"));
+}
+imap_keluar(s);

@@ -1,0 +1,172 @@
+// SMTP (teks polos) — kirim email: teks, HTML, multipart, lampiran.
+// Catatan: tanpa TLS. Untuk relay/sink lokal (MailHog/Mailpit/localhost) atau
+// server yang mengizinkan AUTH polos. Untuk 465/587 ber-TLS, pakai relay lokal.
+
+biar mail_aman: bool = salah;   // benar = SMTPS (TLS langsung, port 465)
+
+// I/O sadar TLS.
+fungsi mail_io_kirim(s: bulat, data: teks): kosong {
+    kalau mail_aman {
+        kirimAman(s, data);
+    } lain {
+        kirim(s, data);
+    }
+}
+
+fungsi mail_io_terima(s: bulat, n: bulat): teks {
+    kalau mail_aman {
+        kembali terimaAman(s, n);
+    }
+    kembali terima(s, n);
+}
+
+// Baca satu balasan SMTP, kembalikan kode 3 digit. Dicatat ke transkrip.
+fungsi mail_resp(s: bulat): bulat {
+    biar r: teks = mail_io_terima(s, 2048);
+    mail_catat("<<", ganti(r, "\r\n", " "));
+    kalau panjangTeks(r) < 3 {
+        kembali 0;
+    }
+    kembali keBulat(potong(r, 0, 3));
+}
+
+// Kirim satu baris perintah + CRLF. Dicatat ke transkrip.
+fungsi mail_perintah(s: bulat, baris: teks): kosong {
+    mail_catat(">>", baris);
+    mail_io_kirim(s, baris + "\r\n");
+}
+
+// Buka koneksi + EHLO + AUTH LOGIN (bila pengguna diisi). Kembalikan soket >= 0,
+// atau kode galat negatif.
+fungsi mail_buka(inang: teks, port: bulat, pengguna: teks, sandi: teks): bulat {
+    mail_aman = salah;
+    mail_log_reset();
+    biar s: bulat = sambung(inang, port);
+    kalau s < 0 {
+        kembali -1;
+    }
+    kalau mail_resp(s) != 220 { tutup(s); kembali -2; }
+    kembali mail_handshake(s, pengguna, sandi);
+}
+
+// SMTPS (TLS langsung, port 465). Sama seperti mail_buka tapi via soket aman.
+fungsi mail_buka_aman(inang: teks, port: bulat, pengguna: teks, sandi: teks): bulat {
+    mail_aman = benar;
+    mail_log_reset();
+    biar s: bulat = sambungAman(inang, port);
+    kalau s < 0 {
+        kembali -1;
+    }
+    kalau mail_resp(s) != 220 { tutupAman(s); kembali -2; }
+    kembali mail_handshake(s, pengguna, sandi);
+}
+
+// EHLO + AUTH LOGIN bersama. Kembalikan soket atau kode galat negatif.
+fungsi mail_handshake(s: bulat, pengguna: teks, sandi: teks): bulat {
+    mail_perintah(s, "EHLO tenun");
+    kalau mail_resp(s) != 250 { tutup(s); kembali -3; }
+    kalau panjangTeks(pengguna) > 0 {
+        mail_perintah(s, "AUTH LOGIN");
+        kalau mail_resp(s) != 334 { tutup(s); kembali -4; }
+        mail_perintah(s, base64(pengguna));
+        kalau mail_resp(s) != 334 { tutup(s); kembali -5; }
+        mail_perintah(s, base64(sandi));
+        kalau mail_resp(s) != 235 { tutup(s); kembali -6; }
+    }
+    kembali s;
+}
+
+// Kirim amplop + blok konten (sudah berisi Content-Type + badan). Soket harus
+// sudah terbuka & terautentikasi. Kembalikan 0 bila sukses.
+fungsi mail_kirim_konten(s: bulat, pengirim: teks, tujuan: teks, subjek: teks, konten: teks): bulat {
+    mail_perintah(s, "MAIL FROM:<" + pengirim + ">");
+    kalau mail_resp(s) != 250 { kembali -7; }
+    mail_perintah(s, "RCPT TO:<" + tujuan + ">");
+    biar rc: bulat = mail_resp(s);
+    kalau rc != 250 {
+        kalau rc != 251 { kembali -8; }
+    }
+    mail_perintah(s, "DATA");
+    kalau mail_resp(s) != 354 { kembali -9; }
+    biar pesan: teks = "From: " + pengirim + "\r\nTo: " + tujuan + "\r\nSubject: " + subjek + "\r\nMIME-Version: 1.0\r\n" + konten;
+    mail_io_kirim(s, pesan + "\r\n.\r\n");
+    mail_catat(">>", "[badan pesan " + keTeks(panjangTeks(pesan)) + " byte]");
+    kalau mail_resp(s) != 250 { kembali -10; }
+    kembali 0;
+}
+
+fungsi mail_selesai(s: bulat): kosong {
+    mail_perintah(s, "QUIT");
+    kalau mail_aman {
+        tutupAman(s);
+    } lain {
+        tutup(s);
+    }
+}
+
+// ---- API publik ----
+
+// Email teks polos.
+fungsi mail_kirim(inang: teks, port: bulat, pengguna: teks, sandi: teks, pengirim: teks, tujuan: teks, subjek: teks, isi: teks): bulat {
+    biar s: bulat = mail_buka(inang, port, pengguna, sandi);
+    kalau s < 0 { kembali s; }
+    biar r: bulat = mail_kirim_konten(s, pengirim, tujuan, subjek, mail_konten_teks(isi));
+    mail_selesai(s);
+    kembali r;
+}
+
+// Email HTML.
+fungsi mail_kirim_html(inang: teks, port: bulat, pengguna: teks, sandi: teks, pengirim: teks, tujuan: teks, subjek: teks, html: teks): bulat {
+    biar s: bulat = mail_buka(inang, port, pengguna, sandi);
+    kalau s < 0 { kembali s; }
+    biar r: bulat = mail_kirim_konten(s, pengirim, tujuan, subjek, mail_konten_html(html));
+    mail_selesai(s);
+    kembali r;
+}
+
+// Email teks + HTML (multipart/alternative).
+fungsi mail_kirim_lengkap(inang: teks, port: bulat, pengguna: teks, sandi: teks, pengirim: teks, tujuan: teks, subjek: teks, isiTeks: teks, html: teks): bulat {
+    biar s: bulat = mail_buka(inang, port, pengguna, sandi);
+    kalau s < 0 { kembali s; }
+    biar r: bulat = mail_kirim_konten(s, pengirim, tujuan, subjek, mail_konten_alt(isiTeks, html));
+    mail_selesai(s);
+    kembali r;
+}
+
+// Email dengan lampiran (multipart/mixed). html=benar untuk badan HTML.
+fungsi mail_kirim_lampiran(inang: teks, port: bulat, pengguna: teks, sandi: teks, pengirim: teks, tujuan: teks, subjek: teks, isi: teks, html: bool, lampiran: []teks): bulat {
+    biar s: bulat = mail_buka(inang, port, pengguna, sandi);
+    kalau s < 0 { kembali s; }
+    biar r: bulat = mail_kirim_konten(s, pengirim, tujuan, subjek, mail_konten_lampiran(isi, html, lampiran));
+    mail_selesai(s);
+    kembali r;
+}
+
+// ---- API publik SMTPS (TLS langsung, port 465) ----
+
+// Email teks polos via SMTPS.
+fungsi mail_kirim_aman(inang: teks, port: bulat, pengguna: teks, sandi: teks, pengirim: teks, tujuan: teks, subjek: teks, isi: teks): bulat {
+    biar s: bulat = mail_buka_aman(inang, port, pengguna, sandi);
+    kalau s < 0 { kembali s; }
+    biar r: bulat = mail_kirim_konten(s, pengirim, tujuan, subjek, mail_konten_teks(isi));
+    mail_selesai(s);
+    kembali r;
+}
+
+// Email HTML via SMTPS.
+fungsi mail_kirim_html_aman(inang: teks, port: bulat, pengguna: teks, sandi: teks, pengirim: teks, tujuan: teks, subjek: teks, html: teks): bulat {
+    biar s: bulat = mail_buka_aman(inang, port, pengguna, sandi);
+    kalau s < 0 { kembali s; }
+    biar r: bulat = mail_kirim_konten(s, pengirim, tujuan, subjek, mail_konten_html(html));
+    mail_selesai(s);
+    kembali r;
+}
+
+// Email dengan lampiran via SMTPS.
+fungsi mail_kirim_lampiran_aman(inang: teks, port: bulat, pengguna: teks, sandi: teks, pengirim: teks, tujuan: teks, subjek: teks, isi: teks, html: bool, lampiran: []teks): bulat {
+    biar s: bulat = mail_buka_aman(inang, port, pengguna, sandi);
+    kalau s < 0 { kembali s; }
+    biar r: bulat = mail_kirim_konten(s, pengirim, tujuan, subjek, mail_konten_lampiran(isi, html, lampiran));
+    mail_selesai(s);
+    kembali r;
+}

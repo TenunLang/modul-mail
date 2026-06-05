@@ -1,0 +1,90 @@
+// Pembentuk badan MIME: teks polos, HTML, multipart/alternative, lampiran.
+
+// Dot-stuffing: baris diawali '.' digandakan agar tidak mengakhiri DATA.
+fungsi mail_stuff(isi: teks): teks {
+    kembali ganti(isi, "\r\n.", "\r\n..");
+}
+
+// Batas (boundary) acak untuk pemisah bagian MIME.
+fungsi mail_boundary(): teks {
+    kembali "=_tenun_" + acak(12);
+}
+
+// Bungkus teks base64 menjadi baris-baris <= lebar karakter (RFC 2045).
+fungsi mail_wrap(b: teks, lebar: bulat): teks {
+    biar keluar: teks = "";
+    biar i: bulat = 0;
+    selama i < panjangTeks(b) {
+        biar n: bulat = lebar;
+        kalau i + n > panjangTeks(b) {
+            n = panjangTeks(b) - i;
+        }
+        keluar = keluar + potong(b, i, n) + "\r\n";
+        i = i + lebar;
+    }
+    kembali keluar;
+}
+
+// Nama berkas dari path (buang direktori, dukung '/' dan '\').
+fungsi mail_nama_file(path: teks): teks {
+    biar nama: teks = path;
+    biar i: bulat = cari(nama, "/");
+    selama i >= 0 {
+        nama = potong(nama, i + 1, panjangTeks(nama) - (i + 1));
+        i = cari(nama, "/");
+    }
+    biar j: bulat = cari(nama, "\\");
+    selama j >= 0 {
+        nama = potong(nama, j + 1, panjangTeks(nama) - (j + 1));
+        j = cari(nama, "\\");
+    }
+    kembali nama;
+}
+
+// ---- Blok konten (dipakai setelah header From/To/Subject) ----
+
+fungsi mail_konten_teks(isi: teks): teks {
+    kembali "Content-Type: text/plain; charset=utf-8\r\n\r\n" + mail_stuff(isi);
+}
+
+fungsi mail_konten_html(html: teks): teks {
+    kembali "Content-Type: text/html; charset=utf-8\r\n\r\n" + mail_stuff(html);
+}
+
+// multipart/alternative: teks polos + HTML (klien pilih yang didukung).
+fungsi mail_konten_alt(teksIsi: teks, html: teks): teks {
+    biar b: teks = mail_boundary();
+    biar keluar: teks = "Content-Type: multipart/alternative; boundary=\"" + b + "\"\r\n\r\n";
+    keluar = keluar + "--" + b + "\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" + mail_stuff(teksIsi) + "\r\n";
+    keluar = keluar + "--" + b + "\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" + mail_stuff(html) + "\r\n";
+    keluar = keluar + "--" + b + "--\r\n";
+    kembali keluar;
+}
+
+// Satu bagian lampiran dari berkas (base64).
+fungsi mail_lampiran_bagian(path: teks, boundary: teks): teks {
+    biar isi: teks = bacaFile(path);
+    biar nama: teks = mail_nama_file(path);
+    biar b64: teks = mail_wrap(base64(isi), 76);
+    kembali "--" + boundary + "\r\n"
+        + "Content-Type: application/octet-stream; name=\"" + nama + "\"\r\n"
+        + "Content-Transfer-Encoding: base64\r\n"
+        + "Content-Disposition: attachment; filename=\"" + nama + "\"\r\n\r\n"
+        + b64 + "\r\n";
+}
+
+// multipart/mixed: satu badan (teks/HTML) + daftar lampiran berkas.
+fungsi mail_konten_lampiran(isi: teks, html: bool, lampiran: []teks): teks {
+    biar b: teks = mail_boundary();
+    biar tipe: teks = "text/plain";
+    kalau html {
+        tipe = "text/html";
+    }
+    biar keluar: teks = "Content-Type: multipart/mixed; boundary=\"" + b + "\"\r\n\r\n";
+    keluar = keluar + "--" + b + "\r\nContent-Type: " + tipe + "; charset=utf-8\r\n\r\n" + mail_stuff(isi) + "\r\n";
+    untuk i dari 0 sampai panjang(lampiran) {
+        keluar = keluar + mail_lampiran_bagian(lampiran[i], b);
+    }
+    keluar = keluar + "--" + b + "--\r\n";
+    kembali keluar;
+}

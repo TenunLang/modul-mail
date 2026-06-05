@@ -1,0 +1,48 @@
+// Utilitas mail: validasi alamat + log transkrip.
+
+// Log transkrip percakapan terakhir (SMTP/IMAP) untuk observabilitas/debug.
+biar mail_log_teks: teks = "";
+
+fungsi mail_log_reset(): kosong {
+    mail_log_teks = "";
+}
+
+fungsi mail_catat(arah: teks, baris: teks): kosong {
+    mail_log_teks = mail_log_teks + arah + " " + baris + "\n";
+}
+
+// Ambil seluruh transkrip percakapan terakhir.
+fungsi mail_log(): teks {
+    kembali mail_log_teks;
+}
+
+// Validasi format alamat email (cek dasar, bukan verifikasi MX/kotak surat).
+// Aturan: ada satu '@', ada bagian lokal & domain, domain punya titik bukan di ujung,
+// tidak ada spasi.
+fungsi mail_validasi(alamat: teks): bool {
+    kalau panjangTeks(alamat) < 3 {
+        kembali salah;
+    }
+    kalau cari(alamat, " ") >= 0 {
+        kembali salah;
+    }
+    biar at: bulat = cari(alamat, "@");
+    kalau at < 1 {
+        kembali salah;                 // butuh bagian lokal sebelum '@'
+    }
+    biar domain: teks = potong(alamat, at + 1, panjangTeks(alamat) - (at + 1));
+    kalau panjangTeks(domain) < 3 {
+        kembali salah;
+    }
+    kalau cari(domain, "@") >= 0 {
+        kembali salah;                 // hanya satu '@'
+    }
+    biar titik: bulat = cari(domain, ".");
+    kalau titik < 1 {
+        kembali salah;                 // domain butuh titik
+    }
+    kalau akhiriDengan(domain, ".") {
+        kembali salah;                 // titik tidak boleh di ujung
+    }
+    kembali benar;
+}

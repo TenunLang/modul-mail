@@ -1,0 +1,168 @@
+// IMAP (teks polos) — baca email: login, pilih kotak, jumlah, fetch, search.
+// Catatan: tanpa TLS (port 143). Untuk server lokal/dev (Dovecot tanpa TLS) atau
+// via stunnel. Server IMAPS publik (993) butuh TLS — belum didukung builtin.
+
+biar imap_tag_n: bulat = 0;
+biar imap_aman: bool = salah;   // benar = pakai TLS (sambungAman/kirimAman/terimaAman)
+
+fungsi imap_tag(): teks {
+    imap_tag_n = imap_tag_n + 1;
+    kembali "a" + keTeks(imap_tag_n);
+}
+
+// I/O yang sadar TLS: pilih jalur polos atau aman sesuai mode koneksi.
+fungsi imap_io_kirim(s: bulat, data: teks): kosong {
+    kalau imap_aman {
+        kirimAman(s, data);
+    } lain {
+        kirim(s, data);
+    }
+}
+
+fungsi imap_io_terima(s: bulat, n: bulat): teks {
+    kalau imap_aman {
+        kembali terimaAman(s, n);
+    }
+    kembali terima(s, n);
+}
+
+// Baca sampai baris bertag selesai (OK/NO/BAD).
+fungsi imap_baca(s: bulat, tag: teks): teks {
+    biar buf: teks = "";
+    selama benar {
+        biar bagian: teks = imap_io_terima(s, 8192);
+        kalau panjangTeks(bagian) == 0 {
+            kembali buf;
+        }
+        buf = buf + bagian;
+        kalau cari(buf, "\r\n" + tag + " OK") >= 0 { kembali buf; }
+        kalau cari(buf, "\r\n" + tag + " NO") >= 0 { kembali buf; }
+        kalau cari(buf, "\r\n" + tag + " BAD") >= 0 { kembali buf; }
+    }
+    kembali buf;
+}
+
+// Kirim perintah bertag, kembalikan seluruh respons.
+fungsi imap_perintah(s: bulat, perintah: teks): teks {
+    biar tag: teks = imap_tag();
+    mail_catat(">>", tag + " " + perintah);
+    imap_io_kirim(s, tag + " " + perintah + "\r\n");
+    biar r: teks = imap_baca(s, tag);
+    mail_catat("<<", ganti(r, "\r\n", " "));
+    kembali r;
+}
+
+// Angka desimal tepat sebelum posisi `pos` (mis "5 EXISTS").
+fungsi imap_angka_mundur(r: teks, pos: bulat): bulat {
+    biar mulai: bulat = pos;
+    biar i: bulat = pos - 1;
+    selama i >= 0 && bacaInt(r, i, 1, salah) >= 48 && bacaInt(r, i, 1, salah) <= 57 {
+        mulai = i;
+        i = i - 1;
+    }
+    kalau mulai >= pos {
+        kembali 0;
+    }
+    kembali keBulat(potong(r, mulai, pos - mulai));
+}
+
+// Sambung ke server IMAP polos (port 143). Kembalikan soket atau -1.
+fungsi imap_sambung(inang: teks, port: bulat): bulat {
+    mail_log_reset();
+    imap_aman = salah;
+    biar s: bulat = sambung(inang, port);
+    kalau s < 0 {
+        kembali -1;
+    }
+    biar greeting: teks = imap_io_terima(s, 1024);
+    mail_catat("<<", ganti(greeting, "\r\n", " "));
+    kembali s;
+}
+
+// Sambung ke server IMAPS ber-TLS (port 993, mis. imap.gmail.com). Kembalikan soket atau -1.
+fungsi imap_sambung_aman(inang: teks, port: bulat): bulat {
+    mail_log_reset();
+    imap_aman = benar;
+    biar s: bulat = sambungAman(inang, port);
+    kalau s < 0 {
+        kembali -1;
+    }
+    biar greeting: teks = imap_io_terima(s, 1024);
+    mail_catat("<<", ganti(greeting, "\r\n", " "));
+    kembali s;
+}
+
+// Login. Argumen dikutip agar sandi berisi spasi (mis. app password Gmail) aman.
+fungsi imap_login(s: bulat, pengguna: teks, sandi: teks): bool {
+    biar r: teks = imap_perintah(s, "LOGIN \"" + pengguna + "\" \"" + sandi + "\"");
+    kembali cari(r, " OK") >= 0;
+}
+
+// Pilih kotak surat (mis. "INBOX"). Kembalikan jumlah pesan (EXISTS), atau -1.
+fungsi imap_pilih(s: bulat, kotak: teks): bulat {
+    biar r: teks = imap_perintah(s, "SELECT " + kotak);
+    kalau cari(r, " OK") < 0 {
+        kembali -1;
+    }
+    biar p: bulat = cari(r, " EXISTS");
+    kalau p < 0 {
+        kembali 0;
+    }
+    kembali imap_angka_mundur(r, p);
+}
+
+// Ambil pesan penuh (RFC822: header + badan) sebagai respons mentah.
+fungsi imap_ambil(s: bulat, nomor: bulat): teks {
+    kembali imap_perintah(s, "FETCH " + keTeks(nomor) + " BODY[]");
+}
+
+// Ambil hanya header pesan.
+fungsi imap_ambil_header(s: bulat, nomor: bulat): teks {
+    kembali imap_perintah(s, "FETCH " + keTeks(nomor) + " BODY[HEADER]");
+}
+
+// Ambil satu field header dari teks pesan mentah ("" bila tidak ada).
+fungsi imap_header(pesan: teks, field: teks): teks {
+    biar kunci: teks = "\r\n" + field + ":";
+    biar p: bulat = cari(pesan, kunci);
+    kalau p < 0 {
+        kembali "";
+    }
+    biar mulai: bulat = p + panjangTeks(kunci);
+    biar ekor: teks = potong(pesan, mulai, panjangTeks(pesan) - mulai);
+    biar akhir: bulat = cari(ekor, "\r\n");
+    kalau akhir < 0 {
+        kembali "";
+    }
+    biar nilai: teks = potong(ekor, 0, akhir);
+    selama mulaiDengan(nilai, " ") {
+        nilai = potong(nilai, 1, panjangTeks(nilai) - 1);
+    }
+    kembali nilai;
+}
+
+// Cari pesan (kriteria IMAP, mis. "UNSEEN" atau "FROM budi@x.id").
+// Kembalikan respons mentah ("* SEARCH 1 2 3").
+fungsi imap_cari(s: bulat, kriteria: teks): teks {
+    kembali imap_perintah(s, "SEARCH " + kriteria);
+}
+
+// Tandai pesan sudah dibaca.
+fungsi imap_tandai_dibaca(s: bulat, nomor: bulat): teks {
+    kembali imap_perintah(s, "STORE " + keTeks(nomor) + " +FLAGS (\\Seen)");
+}
+
+// Hapus pesan (tandai \Deleted lalu EXPUNGE).
+fungsi imap_hapus(s: bulat, nomor: bulat): teks {
+    imap_perintah(s, "STORE " + keTeks(nomor) + " +FLAGS (\\Deleted)");
+    kembali imap_perintah(s, "EXPUNGE");
+}
+
+fungsi imap_keluar(s: bulat): kosong {
+    imap_perintah(s, "LOGOUT");
+    kalau imap_aman {
+        tutupAman(s);
+    } lain {
+        tutup(s);
+    }
+}

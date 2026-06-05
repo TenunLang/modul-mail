@@ -1,10 +1,10 @@
 {
   "nama": "mail",
   "versi": "0.1.0",
-  "deskripsi": "Kirim email via SMTP (teks polos) untuk Tenun.",
+  "deskripsi": "Email lengkap untuk Tenun: SMTP/SMTPS, Resend API, IMAP/IMAPS, HTML, lampiran.",
   "lisensi": "MIT",
   "penulis": "TenunLang",
   "berkas": "src/mail.tenun",
-  "kataKunci": ["mail", "email", "smtp"],
+  "kataKunci": ["mail", "email", "smtp", "imap", "smtps", "imaps", "resend", "html", "lampiran"],
   "butuh": {}
 }

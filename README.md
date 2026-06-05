@@ -1,6 +1,6 @@
 # modul-mail
 
-Kirim email via SMTP untuk bahasa [Tenun](https://github.com/TenunLang/Tenun). Ditulis sepenuhnya dengan Tenun.
+Modul email lengkap untuk bahasa [Tenun](https://github.com/TenunLang/Tenun): kirim (SMTP/SMTPS + Resend API) dan baca (IMAP/IMAPS). Ditulis sepenuhnya dengan Tenun.
 
 ## Pasang
 
@@ -8,50 +8,95 @@ Kirim email via SMTP untuk bahasa [Tenun](https://github.com/TenunLang/Tenun). D
 tenun add mail
 ```
 
-## Pakai
+## Fitur
+
+- Kirim: teks polos, HTML, multipart/alternative (teks+HTML), lampiran (multipart/mixed, base64).
+- Transport: SMTP polos, SMTPS (TLS 465), dan **Resend REST API** (HTTPS) tanpa perlu TLS SMTP.
+- Baca: IMAP polos (143) dan **IMAPS (TLS 993, mis. Gmail)** — login, pilih kotak, jumlah, fetch, header, search, flag, hapus.
+- Validasi alamat email + transkrip/log percakapan untuk debug.
+
+## Kirim email
 
 ```tenun
 impor "mail";
 
-biar r: bulat = mail_kirim(
-    "127.0.0.1", 1025,        // server SMTP
-    "", "",                   // pengguna, sandi (kosong = tanpa AUTH)
-    "noreply@situs.id",       // pengirim
-    "pengguna@contoh.id",     // tujuan
-    "Selamat datang",         // subjek
-    "Halo dari Tenun."        // isi
-);
-kalau r == 0 { cetak("terkirim"); }
+// Teks polos (SMTP polos, mis. Mailpit/relay lokal).
+mail_kirim("127.0.0.1", 1025, "", "", "no@situs.id", "user@x.id", "Subjek", "Isi");
+
+// HTML.
+mail_kirim_html(inang, port, user, sandi, pengirim, tujuan, subjek, "<h1>Halo</h1>");
+
+// Teks + HTML (klien pilih).
+mail_kirim_lengkap(inang, port, user, sandi, pengirim, tujuan, subjek, "teks", "<b>html</b>");
+
+// Dengan lampiran (html=benar untuk badan HTML).
+mail_kirim_lampiran(inang, port, user, sandi, pengirim, tujuan, subjek, "<p>lihat lampiran</p>", benar, ["faktur.pdf", "logo.png"]);
 ```
 
-Dengan autentikasi:
+### SMTPS (TLS langsung, port 465)
+
+Sama seperti di atas, akhiri nama fungsi dengan `_aman`: `mail_kirim_aman`, `mail_kirim_html_aman`, `mail_kirim_lampiran_aman`. Mis. Gmail:
 
 ```tenun
-mail_kirim("smtp.relay.id", 587, "user", "sandi", "dari@id", "ke@id", "Subjek", "Isi");
+mail_kirim_html_aman("smtp.gmail.com", 465, "akun@gmail.com", "app-password",
+    "akun@gmail.com", "tujuan@x.id", "Subjek", "<h1>Halo</h1>");
 ```
 
-## Fungsi
+> Catatan: STARTTLS (port 587) belum didukung — pakai port TLS-langsung 465. Sebagian jaringan memblokir 465/587 keluar; bila begitu, pakai Resend API (port 443).
 
-- `mail_kirim(inang, port, pengguna, sandi, pengirim, tujuan, subjek, isi): bulat`
-  Kirim satu email. Kembalikan `0` bila sukses, kode negatif bila gagal (mis. `-2` greeting, `-6` AUTH, `-8` RCPT). `pengguna`/`sandi` kosong = lewati `AUTH LOGIN`.
+### Resend API (HTTPS, direkomendasikan)
 
-## Catatan TLS
+Tidak perlu TLS SMTP — lewat REST API. Dapatkan API key di resend.com.
 
-Modul ini memakai SMTP **teks polos** (tanpa TLS). Cocok untuk:
+```tenun
+biar resp: teks = mail_resend_html("re_xxx", "onboarding@resend.dev", "kamu@email.id",
+    "Halo", "<h1>Dari Tenun</h1>");
+kalau mail_resend_sukses(resp) { cetak("terkirim"); }
+```
 
-- Relay/sink lokal saat pengembangan (MailHog, Mailpit, `localhost:25`).
-- Server yang mengizinkan AUTH polos di jaringan tepercaya.
+`mail_resend(apikey, pengirim, tujuan, subjek, teks)` untuk versi teks. Respons JSON mentah dikembalikan (berisi `id` bila sukses).
 
-Untuk submission ber-TLS (port 465/587 wajib TLS), jalankan relay lokal sebagai perantara — TLS langsung belum didukung builtin Tenun. Header memakai CRLF dan dot-stuffing sesuai RFC 5321.
+## Baca email (IMAP / IMAPS)
+
+```tenun
+// Gmail butuh IMAPS (TLS 993) + app password.
+biar s: bulat = imap_sambung_aman("imap.gmail.com", 993);
+kalau imap_login(s, "akun@gmail.com", "app password") {
+    biar n: bulat = imap_pilih(s, "INBOX");        // jumlah pesan
+    biar pesan: teks = imap_ambil_header(s, n);    // header pesan terakhir
+    cetak(imap_header(pesan, "From"));
+    cetak(imap_header(pesan, "Subject"));
+}
+imap_keluar(s);
+```
+
+Server tanpa TLS: pakai `imap_sambung(inang, 143)`.
+
+Fungsi IMAP: `imap_sambung`, `imap_sambung_aman`, `imap_login`, `imap_pilih`, `imap_ambil`, `imap_ambil_header`, `imap_header`, `imap_cari`, `imap_tandai_dibaca`, `imap_hapus`, `imap_keluar`.
+
+## Utilitas
+
+- `mail_validasi(alamat: teks): bool` — cek format email.
+- `mail_log(): teks` — transkrip percakapan terakhir (debug/observabilitas).
 
 ## Struktur
 
 ```
 modul-mail/
   tenun.json
-  src/mail.tenun
+  src/
+    mail.tenun     entry (impor util/mime/smtp/imap/resend)
+    util.tenun     validasi + transkrip/log
+    mime.tenun     badan MIME: teks/HTML/multipart/lampiran
+    smtp.tenun     kirim via SMTP/SMTPS
+    imap.tenun     baca via IMAP/IMAPS
+    resend.tenun   kirim via Resend REST API
   contoh/contoh.tenun
 ```
+
+## Catatan TLS
+
+IMAPS/SMTPS/Resend memakai builtin TLS Tenun (`sambungAman`/`httpKirim`, std.crypto.tls + std.http.Client). STARTTLS (upgrade dari polos) belum didukung; gunakan port TLS-langsung (465/993) atau Resend API.
 
 ## Lisensi
 
