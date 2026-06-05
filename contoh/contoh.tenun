@@ -1,0 +1,18 @@
+impor "mail";
+
+// Relay lokal tanpa auth (mis. MailHog/Mailpit di dev).
+biar r: bulat = mail_kirim(
+    "127.0.0.1", 1025,
+    "", "",
+    "noreply@situs.id", "pengguna@contoh.id",
+    "Selamat datang",
+    "Halo, ini email dari aplikasi Tenun."
+);
+kalau r == 0 {
+    cetak("email terkirim");
+} lain {
+    cetak("gagal kirim, kode: " + keTeks(r));
+}
+
+// Dengan AUTH LOGIN:
+// mail_kirim("smtp.relay.id", 587, "user", "sandi", "dari@id", "ke@id", "Subjek", "Isi");

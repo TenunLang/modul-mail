@@ -1,0 +1,74 @@
+// Modul Mail untuk Tenun — kirim email via SMTP (teks polos).
+// Dibangun di atas builtin: sambung/kirim/terima/tutup, base64, keBulat, potong, ganti.
+//
+// Catatan: ini SMTP polos (tanpa TLS). Cocok untuk relay lokal (mis. localhost:25),
+// MailHog/Mailpit saat dev, atau server yang mengizinkan AUTH polos. Untuk submission
+// 465/587 ber-TLS, pakai relay lokal di depannya (TLS belum didukung builtin).
+
+// Baca satu balasan SMTP, kembalikan kode 3 digit (mis. 220, 250, 354, 235).
+fungsi mail_resp(s: bulat): bulat {
+    biar r: teks = terima(s, 2048);
+    kalau panjangTeks(r) < 3 {
+        kembali 0;
+    }
+    kembali keBulat(potong(r, 0, 3));
+}
+
+// Kirim satu baris perintah + CRLF.
+fungsi mail_perintah(s: bulat, baris: teks): kosong {
+    kirim(s, baris + "\r\n");
+}
+
+// Dot-stuffing: baris yang diawali '.' digandakan agar tidak mengakhiri DATA.
+fungsi mail_stuff(isi: teks): teks {
+    kembali ganti(isi, "\r\n.", "\r\n..");
+}
+
+// Kirim email. Kembalikan 0 bila sukses, kode galat negatif bila gagal.
+// pengguna/sandi "" -> lewati AUTH. inang/port = server SMTP.
+fungsi mail_kirim(inang: teks, port: bulat, pengguna: teks, sandi: teks, pengirim: teks, tujuan: teks, subjek: teks, isi: teks): bulat {
+    biar s: bulat = sambung(inang, port);
+    kalau s < 0 {
+        kembali -1;
+    }
+
+    kalau mail_resp(s) != 220 { tutup(s); kembali -2; }
+
+    mail_perintah(s, "EHLO tenun");
+    kalau mail_resp(s) != 250 { tutup(s); kembali -3; }
+
+    kalau panjangTeks(pengguna) > 0 {
+        mail_perintah(s, "AUTH LOGIN");
+        kalau mail_resp(s) != 334 { tutup(s); kembali -4; }
+        mail_perintah(s, base64(pengguna));
+        kalau mail_resp(s) != 334 { tutup(s); kembali -5; }
+        mail_perintah(s, base64(sandi));
+        kalau mail_resp(s) != 235 { tutup(s); kembali -6; }
+    }
+
+    mail_perintah(s, "MAIL FROM:<" + pengirim + ">");
+    kalau mail_resp(s) != 250 { tutup(s); kembali -7; }
+
+    mail_perintah(s, "RCPT TO:<" + tujuan + ">");
+    biar rc: bulat = mail_resp(s);
+    kalau rc != 250 {
+        kalau rc != 251 { tutup(s); kembali -8; }
+    }
+
+    mail_perintah(s, "DATA");
+    kalau mail_resp(s) != 354 { tutup(s); kembali -9; }
+
+    biar pesan: teks = "From: " + pengirim + "\r\n";
+    pesan = pesan + "To: " + tujuan + "\r\n";
+    pesan = pesan + "Subject: " + subjek + "\r\n";
+    pesan = pesan + "MIME-Version: 1.0\r\n";
+    pesan = pesan + "Content-Type: text/plain; charset=utf-8\r\n";
+    pesan = pesan + "\r\n";
+    pesan = pesan + mail_stuff(isi);
+    kirim(s, pesan + "\r\n.\r\n");
+    kalau mail_resp(s) != 250 { tutup(s); kembali -10; }
+
+    mail_perintah(s, "QUIT");
+    tutup(s);
+    kembali 0;
+}
