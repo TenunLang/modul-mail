@@ -1,0 +1,4 @@
+impor "../src/mail.tenun";
+biar pesan: teks = "\r\nFrom: a@b.id\r\nSubject: Halo Dunia\r\n\r\nisi";
+tegasSama(imap_header(pesan, "Subject"), "Halo Dunia", "ambil header Subject");
+tegasSama(imap_header(pesan, "From"), "a@b.id", "ambil header From");
